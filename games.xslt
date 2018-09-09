@@ -150,7 +150,7 @@ function myFunction2() {
             <td><xsl:value-of select="@type"/></td>
           </xsl:when>
         </xsl:choose>
-        <td id="GameName"><xsl:value-of select="GameName"/></td>
+        <td id="GameName"><a href="https://www.google.com/search?q={GameName}+switch+game"><xsl:value-of select="GameName"/></a></td>
         <td id="Developer"><xsl:value-of select="Developer"/></td>
       <td id="ImportedDate"><xsl:value-of select="ImportedDate"/></td>
       </xsl:element>
