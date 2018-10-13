@@ -21,7 +21,7 @@ namespace Switch_Backup_Manager
 {
     internal static class Util
     {
-        public const string VERSION = "1.1.6";   //Actual application version
+        public const string VERSION = "1.1.8";   //Actual application version
         public const string MIN_DB_Version = "1.1.1"; //This is the minimum version of the DB that can work
 
         public const string INI_FILE = "sbm.ini";
@@ -46,6 +46,8 @@ namespace Switch_Backup_Manager
         public static string autoRenamingPatternNSP = "{gamename}";
         public static int MaxSizeFilenameNSP = 0;
 
+        public static bool UserCanDeleteFiles = false;
+        public static bool SendDeletedFilesToRecycleBin = true;
         public static bool AutoUpdateNSDBOnStartup = false;
         public static bool UseTitleKeys = false;
         public static bool ScrapXCIOnSDCard = true;
@@ -743,7 +745,7 @@ namespace Switch_Backup_Manager
                 string newFileName_ = "";
                 string originalFile = file.FilePath;
                 string tmp_name = originalFile + "_tmp";
-                
+
                 if (File.Exists(newFileName))
                 {
                     Microsoft.VisualBasic.FileIO.FileSystem.MoveFile(originalFile, tmp_name, true);
@@ -810,6 +812,72 @@ namespace Switch_Backup_Manager
             return result;
         }
 
+        public static void DeleteSelectedFiles(Dictionary<Tuple<string, string>, FileData> files, string source) //source possible values: "local", "sdcard", "eshop"
+        {
+            int filesCount = files.Count();
+            int i = 0;
+            logger.Info("Starting to delete selected " + source + " files.");
+
+            if (source != "sdcard")
+            {
+                foreach (KeyValuePair<Tuple<string, string>, FileData> entry in files)
+                {
+                    if (DeleteSelectedFile(entry.Value))
+                    {
+                        RemoveFileDataFromXML(entry.Value, source);
+                    }
+                }
+
+                if (source == "local")
+                {
+                    XML_Local.Save(@LOCAL_FILES_DB);
+                }
+                else if (source == "eshop")
+                {
+                    XML_NSP_Local.Save(LOCAL_NSP_FILES_DB);
+                }
+            }
+            else
+            {
+                foreach (KeyValuePair<Tuple<string, string>, FileData> entry in files)
+                {
+                    DeleteSelectedFile(entry.Value);
+                }
+            }
+            logger.Info("Finished to delete " + source + " files.");
+        }
+
+        public static bool DeleteSelectedFile(FileData file)
+        {
+            bool result = false;
+
+            if (file != null)
+            {
+                string extension = Path.GetExtension(file.FilePath);
+
+                if (File.Exists(file.FilePath))
+                {
+                    if (extension != ".xc0")
+                    {
+                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(file.FilePath, UIOption.OnlyErrorDialogs, SendDeletedFilesToRecycleBin ? RecycleOption.SendToRecycleBin : RecycleOption.DeletePermanently);
+                    } else
+                    {
+                        List<string> list = GetSplitedXCIsFiles(file.FilePath);
+                        foreach (string splited_file in list)
+                        {
+                            Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(splited_file, UIOption.OnlyErrorDialogs, SendDeletedFilesToRecycleBin ? RecycleOption.SendToRecycleBin : RecycleOption.DeletePermanently);
+                        }
+                    }                    
+                    result = true;
+                } else
+                {
+                    logger.Info("File not found: " + file.FilePath);
+                    return true;
+                }
+            }
+            return result;
+        }
+
         public static void UpdateXMLFromFileData(FileData file, string source)
         {
             XElement element = null;
@@ -830,6 +898,25 @@ namespace Switch_Backup_Manager
             {
                 element.Remove();
                 WriteFileDataToXML(file, xml);
+            }
+        }
+
+        public static void RemoveFileDataFromXML(FileData file, string source)
+        {
+            XElement element = null;
+            if (source == "local")
+            {
+                element = XML_Local.Descendants("Game")
+                    .FirstOrDefault(el => (string)el.Attribute("TitleID") == file.TitleID);
+            } else if (source == "eshop")
+            {
+                element = XML_NSP_Local.Descendants("Game")
+                    .FirstOrDefault(el => (string)el.Attribute("TitleID") == file.TitleID);
+            }
+
+            if (element != null)
+            {
+                element.Remove();
             }
         }
 
@@ -1300,6 +1387,8 @@ namespace Switch_Backup_Manager
                 }
             }
 
+            string userCanDeleteFiles = ini.IniReadValue("Config", "userCanDeleteFiles").Trim().ToLower();
+            string sendDeletedFilesToRecycleBin = ini.IniReadValue("Config", "sendDeletedFilesToRecycleBin").Trim().ToLower();
             string scrapXCI = ini.IniReadValue("SD", "scrapXCI").Trim().ToLower();
             string scrapNSP = ini.IniReadValue("SD", "scrapNSP").Trim().ToLower();
             string scrapInstalledNSP = ini.IniReadValue("SD", "scrapInstalledNSP").Trim().ToLower();
@@ -1313,6 +1402,8 @@ namespace Switch_Backup_Manager
             string highlightNSPOnScene_color = ini.IniReadValue("Visual", "highlightNSPOnScene_color").Trim().ToLower();
             string highlightBothOnScene_color = ini.IniReadValue("Visual", "highlightBOTHOnScene_color").Trim().ToLower();
 
+            if (userCanDeleteFiles != "") { UserCanDeleteFiles = (userCanDeleteFiles == "true"); } else { ini.IniWriteValue("Config", "userCanDeleteFiles", "false"); };
+            if (sendDeletedFilesToRecycleBin != "") { SendDeletedFilesToRecycleBin = (sendDeletedFilesToRecycleBin == "true"); } else { ini.IniWriteValue("Config", "sendDeletedFilesToRecycleBin", "true"); };
             if (scrapXCI != "") { ScrapXCIOnSDCard = (scrapXCI == "true"); } else { ini.IniWriteValue("SD", "scrapXCI", "true"); };
             if (scrapNSP != "") { ScrapNSPOnSDCard = (scrapNSP == "true"); } else { ini.IniWriteValue("SD", "scrapNSP", "true"); };
             if (scrapInstalledNSP != "") { ScrapInstalledEshopSDCard = (scrapInstalledNSP == "true"); } else { ini.IniWriteValue("SD", "scrapInstalledNSP", "false"); };
@@ -1833,7 +1924,7 @@ namespace Switch_Backup_Manager
         public static FileData GetFileDataNSP(string file)
         {
             FileData data = new FileData();
-            data.ImportedDate = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            data.ImportedDate = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
             data.FilePath = file;
             data.FileName = Path.GetFileNameWithoutExtension(file);
             data.FileNameWithExt = Path.GetFileName(file);
@@ -1978,6 +2069,10 @@ namespace Switch_Backup_Manager
                         else if (Firmware <= 336592976)
                         {
                             data.Firmware = "5.1.0";
+                        }
+                        else if (Firmware <= 402653544)
+                        {
+                            data.Firmware = "6.0.0";
                         }
                         else
                         {
@@ -2302,7 +2397,7 @@ namespace Switch_Backup_Manager
         public static FileData GetFileData(string filepath)
         {
             FileData result = new FileData();
-            result.ImportedDate = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            result.ImportedDate = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
             //Basic Info
             result.FilePath = filepath;
             result.FileName = Path.GetFileNameWithoutExtension(filepath);
